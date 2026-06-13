@@ -1,4 +1,5 @@
 use super::*;
+use crate::point_add::route_config;
 
 #[inline]
 fn maj1_inputs_distinct(a: QubitId, k: QubitId, carry: QubitId, target: QubitId) -> bool {
@@ -7,7 +8,7 @@ fn maj1_inputs_distinct(a: QubitId, k: QubitId, carry: QubitId, target: QubitId)
 
 #[inline]
 fn fold_maj1_enabled() -> bool {
-    std::env::var("DIALOG_GCD_FOLD_MAJ1").ok().as_deref() == Some("1")
+    route_config::env_flag("DIALOG_GCD_FOLD_MAJ1")
 }
 
 fn emit_fold_maj1(b: &mut B, a: QubitId, k: QubitId, carry: QubitId, target: QubitId) {
@@ -463,10 +464,7 @@ pub(crate) fn highest_set_bit(c: U256) -> usize {
 }
 
 pub(crate) fn double_carry_trunc_window() -> Option<usize> {
-    std::env::var("KAL_DOUBLE_CARRY_TRUNC_W")
-        .ok()
-        .and_then(|s| s.parse::<usize>().ok())
-        .filter(|&w| w > 0)
+    route_config::env_nonzero_usize("KAL_DOUBLE_CARRY_TRUNC_W")
 }
 
 /// Carry/borrow-tail truncation window for the pseudomersenne overflow/underflow
@@ -478,10 +476,7 @@ pub(crate) fn double_carry_trunc_window() -> Option<usize> {
 /// so the reverse apply exactly inverts the forward when no truncation triggers
 /// (the regime selected by the co-tuned reroll).
 pub(crate) fn fold_carry_trunc_window() -> Option<usize> {
-    std::env::var("KAL_FOLD_CARRY_TRUNC_W")
-        .ok()
-        .and_then(|s| s.parse::<usize>().ok())
-        .filter(|&w| w > 0)
+    route_config::env_nonzero_usize("KAL_FOLD_CARRY_TRUNC_W")
 }
 
 /// Default-OFF lever: realize the per-position-controls majority carry/borrow
@@ -503,11 +498,11 @@ pub(crate) fn fold_carry_trunc_window() -> Option<usize> {
 /// position completes, so the later sum-bit CX and the measurement-uncompute
 /// (which read the *restored* `cin`) are untouched. Pure CCX/CX ⇒ no phase.
 pub(crate) fn perpos_maj2_enabled() -> bool {
-    std::env::var("DIALOG_GCD_PERPOS_MAJ2").ok().as_deref() == Some("1")
+    route_config::env_flag("DIALOG_GCD_PERPOS_MAJ2")
 }
 
 pub(crate) fn fold_maj2_enabled() -> bool {
-    std::env::var("DIALOG_GCD_FOLD_MAJ2").ok().as_deref() == Some("1")
+    route_config::env_flag("DIALOG_GCD_FOLD_MAJ2")
 }
 
 fn borrowed_const_fold_carries(
@@ -1093,7 +1088,7 @@ pub(crate) fn csub_per_position_controls_trunc(
 /// i.e. the fold floor falls by 4 qubits, value/phase-EXACT (identical arithmetic
 /// and identical truncation `last`; only the ancilla lifetime is tightened).
 pub(crate) fn fold_freed_tail_enabled() -> bool {
-    std::env::var("DIALOG_GCD_FOLD_FREED_TAIL").ok().as_deref() == Some("1")
+    route_config::env_flag("DIALOG_GCD_FOLD_FREED_TAIL")
 }
 
 /// e,d-extension of the freed-tail lever (HYP-6 §4a). When ON (and the freed-tail
@@ -1109,10 +1104,7 @@ pub(crate) fn fold_freed_tail_enabled() -> bool {
 /// cost = a handful of CX + 1 CCX/call to re-derive `d`). Default OFF ⇒ the
 /// freed-tail path is byte-identical to before this lever existed.
 pub(crate) fn fold_freed_tail_ed_enabled() -> bool {
-    std::env::var("DIALOG_GCD_FOLD_FREED_TAIL_ED")
-        .ok()
-        .as_deref()
-        == Some("1")
+    route_config::env_flag("DIALOG_GCD_FOLD_FREED_TAIL_ED")
 }
 
 /// Reuse four future-zero low-carry slots as the derived fold controls
@@ -1121,45 +1113,27 @@ pub(crate) fn fold_freed_tail_ed_enabled() -> bool {
 /// and restored only after carries 12..33 have been uncomputed. This is
 /// value/phase exact and removes four qubits from the fused-fold high-water.
 pub(crate) fn fold_host_derived_controls_enabled() -> bool {
-    std::env::var("DIALOG_GCD_FOLD_HOST_DERIVED_CONTROLS")
-        .ok()
-        .as_deref()
-        == Some("1")
+    route_config::env_flag("DIALOG_GCD_FOLD_HOST_DERIVED_CONTROLS")
 }
 
 fn fold_host_n10_enabled() -> bool {
-    std::env::var("DIALOG_GCD_FOLD_HOST_N10")
-        .ok()
-        .as_deref()
-        == Some("1")
+    route_config::env_flag("DIALOG_GCD_FOLD_HOST_N10")
 }
 
 fn fold_host_h_n10_enabled() -> bool {
-    std::env::var("DIALOG_GCD_FOLD_HOST_H_N10")
-        .ok()
-        .as_deref()
-        == Some("1")
+    route_config::env_flag("DIALOG_GCD_FOLD_HOST_H_N10")
 }
 
 fn fold_host_h_xed_n10_enabled() -> bool {
-    std::env::var("DIALOG_GCD_FOLD_HOST_H_XED_N10")
-        .ok()
-        .as_deref()
-        == Some("1")
+    route_config::env_flag("DIALOG_GCD_FOLD_HOST_H_XED_N10")
 }
 
 fn fold_host_e_enabled() -> bool {
-    std::env::var("DIALOG_GCD_FOLD_HOST_E")
-        .ok()
-        .as_deref()
-        == Some("1")
+    route_config::env_flag("DIALOG_GCD_FOLD_HOST_E")
 }
 
 fn fold_host_d_enabled() -> bool {
-    std::env::var("DIALOG_GCD_FOLD_HOST_D")
-        .ok()
-        .as_deref()
-        == Some("1")
+    route_config::env_flag("DIALOG_GCD_FOLD_HOST_D")
 }
 
 /// Per-call carry window override for the FUSED FOLD only (`double_y`/`halve_y`),
@@ -1170,74 +1144,44 @@ fn fold_host_d_enabled() -> bool {
 /// truncation rate (the same FS-island hazard class the shared window already
 /// carries — see KAL_DOUBLE_CARRY_TRUNC_W).
 pub(crate) fn fold_only_carry_trunc_window() -> Option<usize> {
-    std::env::var("DIALOG_GCD_FOLD_CARRY_TRUNC_W")
-        .ok()
-        .and_then(|s| s.parse::<usize>().ok())
-        .filter(|&w| w > 0)
+    route_config::env_nonzero_usize("DIALOG_GCD_FOLD_CARRY_TRUNC_W")
 }
 
 fn fold_park_low_carries() -> usize {
-    std::env::var("DIALOG_GCD_FOLD_PARK_LOW_CARRIES")
-        .ok()
-        .and_then(|s| s.parse::<usize>().ok())
-        .unwrap_or(0)
+    route_config::env_usize_or("DIALOG_GCD_FOLD_PARK_LOW_CARRIES", 0)
 }
 
 pub(crate) fn fold_park_low_carries_at_step(step: Option<usize>) -> usize {
     let mapped = step.and_then(|step| {
-        let map = std::env::var("DIALOG_GCD_FOLD_PARK_LOW_CARRIES_STEP_MAP").ok()?;
-        map.split(',').rev().find_map(|entry| {
-            let (raw_step, raw_value) = entry.trim().split_once(':')?;
-            if raw_step.trim().parse::<usize>().ok()? != step {
-                return None;
-            }
-            raw_value.trim().parse::<usize>().ok()
-        })
+        route_config::env_step_map_override("DIALOG_GCD_FOLD_PARK_LOW_CARRIES_STEP_MAP", step)
     });
     mapped.unwrap_or_else(fold_park_low_carries)
 }
 
 pub(crate) fn fold_stream_controls_enabled() -> bool {
-    std::env::var("DIALOG_GCD_FOLD_STREAM_CONTROLS")
-        .ok()
-        .as_deref()
-        == Some("1")
-        && fold_park_low_carries() >= 12
+    route_config::env_flag("DIALOG_GCD_FOLD_STREAM_CONTROLS") && fold_park_low_carries() >= 12
 }
 
 fn fold_host_streamed_control_enabled() -> bool {
-    std::env::var("DIALOG_GCD_FOLD_HOST_STREAMED_CONTROL")
-        .ok()
-        .as_deref()
-        == Some("1")
+    route_config::env_flag("DIALOG_GCD_FOLD_HOST_STREAMED_CONTROL")
         && fold_park_low_carries() >= 13
 }
 
 fn fold_host_e_top_carry_enabled() -> bool {
-    std::env::var("DIALOG_GCD_FOLD_HOST_E_TOP_CARRY")
-        .ok()
-        .as_deref()
-        == Some("1")
+    route_config::env_flag("DIALOG_GCD_FOLD_HOST_E_TOP_CARRY")
 }
 
 fn fold_host_d_carry12_enabled() -> bool {
-    std::env::var("DIALOG_GCD_FOLD_HOST_D_CARRY12")
-        .ok()
-        .as_deref()
-        == Some("1")
-        && fold_park_low_carries() >= 14
+    route_config::env_flag("DIALOG_GCD_FOLD_HOST_D_CARRY12") && fold_park_low_carries() >= 14
 }
 
 fn fold_host_ovf2_carry13_enabled() -> bool {
-    std::env::var("DIALOG_GCD_FOLD_HOST_OVF2_CARRY13")
-        .ok()
-        .as_deref()
-        == Some("1")
+    route_config::env_flag("DIALOG_GCD_FOLD_HOST_OVF2_CARRY13")
         && fold_park_low_carries() >= 15
 }
 
 fn fold_stream_profile_phase(b: &mut B, add_phase: &'static str, sub_phase: &'static str, is_add: bool) {
-    if std::env::var("DIALOG_GCD_FOLD_PROFILE_PHASES").ok().as_deref() == Some("1") {
+    if route_config::env_flag("DIALOG_GCD_FOLD_PROFILE_PHASES") {
         b.set_phase(if is_add { add_phase } else { sub_phase });
     }
 }

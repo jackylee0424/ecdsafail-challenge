@@ -5,6 +5,7 @@
 //! `emit_dialog_gcd_compressed_sidecar_*` block-lifecycle emitters) lives in the
 //! sibling module.
 use super::*;
+use crate::point_add::route_config;
 
 mod compressed;
 mod config;
@@ -202,22 +203,13 @@ pub(crate) fn dialog_gcd_width_margin() -> f64 {
     // Default 37.0 reproduces pldallairedemers' baseline byte-for-byte.
     // Lowering it tightens every GCD-body width (cswap/sub/add) -> fewer
     // Toffoli, peak-neutral (early steps clamp at N). Co-tune with reroll.
-    std::env::var("DIALOG_GCD_WIDTH_MARGIN")
-        .ok()
-        .and_then(|s| s.parse::<f64>().ok())
-        .filter(|m| m.is_finite() && *m >= 0.0 && *m <= N as f64)
-        .unwrap_or(37.0)
+    dialog_gcd_core_route_env().width_margin
 }
 
 pub(crate) fn dialog_gcd_width_slope() -> f64 {
     // Per-step shrink rate of the realizable max(bitlen(u),bitlen(v)).
     // Default 0.5*1.415 = 0.7075 reproduces the baseline.
-    std::env::var("DIALOG_GCD_WIDTH_SLOPE_X1000")
-        .ok()
-        .and_then(|s| s.parse::<f64>().ok())
-        .filter(|s| s.is_finite() && *s > 0.0 && *s <= 4000.0)
-        .map(|s| s / 1000.0)
-        .unwrap_or(0.5 * 1.415)
+    dialog_gcd_core_route_env().width_slope
 }
 
 pub(crate) fn dialog_gcd_tobitvector_active_width(step: usize) -> usize {
@@ -232,30 +224,11 @@ pub(crate) fn dialog_gcd_tobitvector_active_width(step: usize) -> usize {
 }
 
 fn dialog_gcd_step_map_value(env: &str, step: usize) -> usize {
-    let Ok(map) = std::env::var(env) else {
-        return 0;
-    };
-    map.split(',')
-        .filter_map(|entry| {
-            let (s, value) = entry.trim().split_once(':')?;
-            Some((
-                s.trim().parse::<usize>().ok()?,
-                value.trim().parse::<usize>().ok()?,
-            ))
-        })
-        .filter_map(|(s, value)| (s == step).then_some(value))
-        .sum()
+    route_config::env_step_map_value(env, step)
 }
 
 fn dialog_gcd_step_map_override(env: &str, step: usize) -> Option<usize> {
-    let map = std::env::var(env).ok()?;
-    map.split(',').rev().find_map(|entry| {
-        let (raw_step, raw_value) = entry.trim().split_once(':')?;
-        if raw_step.trim().parse::<usize>().ok()? != step {
-            return None;
-        }
-        raw_value.trim().parse::<usize>().ok()
-    })
+    route_config::env_step_map_override(env, step)
 }
 
 pub(crate) fn dialog_gcd_width_step_bump(step: usize) -> usize {
@@ -291,14 +264,7 @@ pub(crate) fn dialog_gcd_fused_fold_carry_trunc_window(
 /// leaving the cswap and comparator at full active_width. Returns the truncated
 /// body width, clamped to >= 2.
 pub(crate) fn dialog_gcd_body_carry_band_trim(step: usize) -> Option<usize> {
-    let trims = std::env::var("DIALOG_GCD_BODY_CARRY_BAND_TRIMS").ok()?;
-    if trims.trim().is_empty() {
-        return None;
-    }
-    let trims: Vec<usize> = trims
-        .split(',')
-        .filter_map(|s| s.trim().parse::<usize>().ok())
-        .collect();
+    let trims = route_config::env_trim_list("DIALOG_GCD_BODY_CARRY_BAND_TRIMS")?;
     if trims.is_empty() {
         return None;
     }
@@ -309,11 +275,7 @@ pub(crate) fn dialog_gcd_body_carry_band_trim(step: usize) -> Option<usize> {
 }
 
 pub(crate) fn dialog_gcd_tobitvector_cswap_width(active_width: usize, step: usize) -> usize {
-    if std::env::var("DIALOG_GCD_TOBITVECTOR_CSWAP_BODY_TRIM")
-        .ok()
-        .as_deref()
-        == Some("1")
-    {
+    if dialog_gcd_core_route_env().tobitvector_cswap_body_trim {
         dialog_gcd_body_carry_trunc_width(active_width, step).min(active_width)
     } else {
         active_width
@@ -321,11 +283,7 @@ pub(crate) fn dialog_gcd_tobitvector_cswap_width(active_width: usize, step: usiz
 }
 
 pub(crate) fn dialog_gcd_tobitvector_shift_width(active_width: usize, step: usize) -> usize {
-    if std::env::var("DIALOG_GCD_TOBITVECTOR_SHIFT_BODY_TRIM")
-        .ok()
-        .as_deref()
-        == Some("1")
-    {
+    if dialog_gcd_core_route_env().tobitvector_shift_body_trim {
         dialog_gcd_body_carry_trunc_width(active_width, step).min(active_width)
     } else {
         active_width
@@ -334,10 +292,7 @@ pub(crate) fn dialog_gcd_tobitvector_shift_width(active_width: usize, step: usiz
 
 pub(crate) fn dialog_gcd_body_carry_trunc_width(active_width: usize, step: usize) -> usize {
     let mut w = dialog_gcd_body_carry_band_trim(step).unwrap_or_else(|| {
-        std::env::var("DIALOG_GCD_BODY_CARRY_TRUNC_W")
-            .ok()
-            .and_then(|s| s.parse::<usize>().ok())
-            .unwrap_or(0)
+        route_config::env_usize_or("DIALOG_GCD_BODY_CARRY_TRUNC_W", 0)
     });
     if dialog_gcd_trio_width_notch_enabled() && step == dialog_gcd_trio_width_notch_step() {
         w = w.saturating_add(dialog_gcd_trio_width_notch_extra());
@@ -362,57 +317,29 @@ pub(crate) fn dialog_gcd_body_carry_trunc_width(active_width: usize, step: usize
 }
 
 pub(crate) fn dialog_gcd_binder_notch_steps() -> Vec<usize> {
-    std::env::var("DIALOG_GCD_BINDER_NOTCH_STEPS")
-        .ok()
-        .map(|s| {
-            s.split(',')
-                .filter_map(|t| t.trim().parse::<usize>().ok())
-                .collect()
-        })
-        .unwrap_or_default()
+    route_config::env_usize_csv("DIALOG_GCD_BINDER_NOTCH_STEPS")
 }
 
 pub(crate) fn dialog_gcd_binder_notch_extra() -> usize {
-    std::env::var("DIALOG_GCD_BINDER_NOTCH_EXTRA")
-        .ok()
-        .and_then(|s| s.parse::<usize>().ok())
-        .unwrap_or(2)
+    route_config::env_usize_or("DIALOG_GCD_BINDER_NOTCH_EXTRA", 2)
 }
 
 pub(crate) fn dialog_gcd_binder_notch_map_extra(step: usize) -> usize {
-    let Ok(map) = std::env::var("DIALOG_GCD_BINDER_NOTCH_MAP") else {
-        return 0;
-    };
-    map.split(',')
-        .filter_map(|entry| {
-            let (s, extra) = entry.trim().split_once(':')?;
-            Some((
-                s.trim().parse::<usize>().ok()?,
-                extra.trim().parse::<usize>().ok()?,
-            ))
-        })
-        .filter_map(|(s, extra)| (s == step).then_some(extra))
-        .sum()
+    route_config::env_step_map_value("DIALOG_GCD_BINDER_NOTCH_MAP", step)
 }
 
 pub(crate) fn dialog_gcd_trio_width_notch_enabled() -> bool {
     // Default-on successor from aaf9616: the current route inherited its body
     // geometry, and this one-step notch is needed to reclaim the 1306q tier.
-    std::env::var("DIALOG_GCD_TRIO_WIDTH_NOTCH").ok().as_deref() != Some("0")
+    route_config::env_flag_default_on("DIALOG_GCD_TRIO_WIDTH_NOTCH")
 }
 
 pub(crate) fn dialog_gcd_trio_width_notch_step() -> usize {
-    std::env::var("DIALOG_GCD_TRIO_WIDTH_NOTCH_STEP")
-        .ok()
-        .and_then(|s| s.parse::<usize>().ok())
-        .unwrap_or(11)
+    route_config::env_usize_or("DIALOG_GCD_TRIO_WIDTH_NOTCH_STEP", 11)
 }
 
 pub(crate) fn dialog_gcd_trio_width_notch_extra() -> usize {
-    std::env::var("DIALOG_GCD_TRIO_WIDTH_NOTCH_EXTRA")
-        .ok()
-        .and_then(|s| s.parse::<usize>().ok())
-        .unwrap_or(2)
+    route_config::env_usize_or("DIALOG_GCD_TRIO_WIDTH_NOTCH_EXTRA", 2)
 }
 
 
@@ -1508,6 +1435,7 @@ fn dialog_gcd_conditional_boundary_replay(
 ) {
     assert!(!targets.is_empty());
     assert!(targets.windows(2).all(|w| w[0].1 < w[1].1));
+    let mut cleaned_targets: Vec<QubitId> = Vec::new();
     for index in (0..targets.len()).rev() {
         let (target, p) = targets[index];
         let (start, carry_in) = if index == 0 {
@@ -1517,14 +1445,38 @@ fn dialog_gcd_conditional_boundary_replay(
         };
         let phase = b.alloc_bit();
         b.hmr(target, phase);
-        cmp_lt_phase_conditioned_with_cin(
-            b,
-            &u[start..p],
-            &v[start..p],
-            carry_in,
-            ctrl,
-            phase,
-        );
+        cleaned_targets.push(target);
+        if std::env::var("DIALOG_GCD_BOUNDARY_REPLAY_BORROW_CLEANED")
+            .ok()
+            .as_deref()
+            == Some("1")
+        {
+            let n = p - start;
+            let borrowed = cleaned_targets.len().min(n);
+            let owned = b.alloc_qubits(n - borrowed);
+            let mut carries = Vec::with_capacity(n);
+            carries.extend_from_slice(&cleaned_targets[..borrowed]);
+            carries.extend_from_slice(&owned);
+            cmp_lt_phase_conditioned_borrowed_carries(
+                b,
+                &u[start..p],
+                &v[start..p],
+                carry_in,
+                &carries,
+                ctrl,
+                phase,
+            );
+            b.free_vec(&owned);
+        } else {
+            cmp_lt_phase_conditioned_with_cin(
+                b,
+                &u[start..p],
+                &v[start..p],
+                carry_in,
+                ctrl,
+                phase,
+            );
+        }
     }
 }
 
@@ -1558,7 +1510,7 @@ pub(crate) fn dialog_gcd_add_ctrl_chunked_low_to_ext(
         .flatten();
     let boundary_hosts = &clean_scratch
         [usize::from(!implicit_high_zero && zero_host.is_some())..];
-    let mut couts: Vec<(QubitId, usize, bool)> = Vec::new();
+    let mut couts: Vec<(QubitId, usize, bool, bool)> = Vec::new();
 
     for blk in 0..blocks {
         let hi = dialog_gcd_chunk_hi(blocks, blk, ext_n);
@@ -1616,8 +1568,56 @@ pub(crate) fn dialog_gcd_add_ctrl_chunked_low_to_ext(
         } else {
             &[]
         };
+        if std::env::var("TRACE_APPLY_CHUNKS").is_ok() {
+            eprintln!(
+                "TRACE apply_add block={blk} lo={lo} hi={hi} width={} boundary_live={} future_borrow={} active_before_ripple={}",
+                hi - lo,
+                couts.len(),
+                future_boundary_carries.len(),
+                b.active_qubits
+            );
+        }
         b.set_phase("dialog_gcd_apply_chunk_add_ripple");
-        if implicit_high_zero {
+        if implicit_high_zero
+            && (std::env::var("DIALOG_GCD_APPLY_FIRST_DIRTY_QOFFSET")
+                .ok()
+                .as_deref()
+                == Some("1")
+                || std::env::var("DIALOG_GCD_APPLY_ALL_DIRTY_QOFFSET")
+                    .ok()
+                    .as_deref()
+                    == Some("1"))
+            && (blk == 0
+                || std::env::var("DIALOG_GCD_APPLY_ALL_DIRTY_QOFFSET")
+                    .ok()
+                    .as_deref()
+                    == Some("1"))
+            && future_boundary_carries.len() >= 3
+            && source.len().saturating_sub(hi) >= acc_block.len().saturating_sub(2)
+        {
+            let clean2 = [future_boundary_carries[0], future_boundary_carries[1]];
+            let mut f_ext = f.clone();
+            f_ext.push(future_boundary_carries[2]);
+            if blk == 0 {
+                super::venting::iadd_dirty_2clean_qoffset(
+                    b,
+                    &acc_block,
+                    &source[hi..],
+                    &clean2,
+                    &f_ext,
+                    false,
+                );
+            } else {
+                super::venting::iadd_dirty_2clean_qoffset_carry_q(
+                    b,
+                    &acc_block,
+                    &source[hi..],
+                    &clean2,
+                    &f_ext,
+                    carry,
+                );
+            }
+        } else if implicit_high_zero {
             dialog_gcd_add_fast_low_to_ext_with_borrowed_carries(
                 b,
                 &f,
@@ -1642,23 +1642,42 @@ pub(crate) fn dialog_gcd_add_ctrl_chunked_low_to_ext(
         b.set_phase("dialog_gcd_apply_chunk_add_clear");
         dialog_gcd_clear_controlled_slice_hmr(b, ctrl, source, lo, &f);
         b.free_vec(&f);
-        couts.push((cout, hi, owned_cout));
+        if dialog_gcd_apply_eager_boundary_clear_enabled() {
+            if let Some((prev_cout, prev_p, prev_owned, prev_cleared)) = couts.last_mut() {
+                if !*prev_cleared {
+                    b.set_phase("dialog_gcd_apply_chunk_add_eager_boundary_clear");
+                    ccx_cmp_lt_into_fast(
+                        b,
+                        &acc_ext[..*prev_p],
+                        &source[..*prev_p],
+                        ctrl,
+                        *prev_cout,
+                    );
+                    *prev_cleared = true;
+                    if *prev_owned {
+                        b.free(*prev_cout);
+                    }
+                }
+            }
+        }
+        couts.push((cout, hi, owned_cout, false));
         carry = cout;
         lo = hi;
     }
 
     if dialog_gcd_apply_chunked_f_fuse_boundary_clears_enabled() {
-        if let Some(&(_, p, _)) = couts.last() {
+        if let Some((_, p, _, _)) = couts.iter().rev().find(|&&(_, _, _, cleared)| !cleared) {
             b.set_phase("dialog_gcd_apply_chunk_add_boundary_clear");
             let targets = couts
                 .iter()
-                .map(|&(cout, p, _)| (cout, p))
+                .filter(|&&(_, _, _, cleared)| !cleared)
+                .map(|&(cout, p, _, _)| (cout, p))
                 .collect::<Vec<_>>();
             if dialog_gcd_apply_boundary_conditional_replay_enabled() {
                 dialog_gcd_conditional_boundary_replay(
                     b,
-                    &acc_ext[..p],
-                    &source[..p],
+                    &acc_ext[..*p],
+                    &source[..*p],
                     ctrl,
                     c_in,
                     &targets,
@@ -1666,24 +1685,33 @@ pub(crate) fn dialog_gcd_add_ctrl_chunked_low_to_ext(
             } else if let Some(split) = dialog_gcd_apply_boundary_split() {
                 ccx_cmp_lt_into_fast_prefix_targets_split(
                     b,
-                    &acc_ext[..p],
-                    &source[..p],
+                    &acc_ext[..*p],
+                    &source[..*p],
                     ctrl,
                     &targets,
-                    split.min(p.saturating_sub(1)),
+                    split.min((*p).saturating_sub(1)),
                 );
             } else {
-                ccx_cmp_lt_into_fast_prefix_targets(b, &acc_ext[..p], &source[..p], ctrl, &targets);
+                ccx_cmp_lt_into_fast_prefix_targets(
+                    b,
+                    &acc_ext[..*p],
+                    &source[..*p],
+                    ctrl,
+                    &targets,
+                );
             }
         }
     } else {
-        for &(cout, p, _) in couts.iter().rev() {
+        for &(cout, p, _, cleared) in couts.iter().rev() {
+            if cleared {
+                continue;
+            }
             b.set_phase("dialog_gcd_apply_chunk_add_boundary_clear");
             ccx_cmp_lt_into_fast(b, &acc_ext[..p], &source[..p], ctrl, cout);
         }
     }
-    for &(cout, _, owned_cout) in couts.iter().rev() {
-        if owned_cout {
+    for &(cout, _, owned_cout, cleared) in couts.iter().rev() {
+        if owned_cout && !cleared {
             b.free(cout);
         }
     }
@@ -1717,7 +1745,7 @@ pub(crate) fn dialog_gcd_sub_ctrl_chunked_low_to_ext(
         .flatten();
     let boundary_hosts = &clean_scratch
         [usize::from(!implicit_high_zero && zero_host.is_some())..];
-    let mut bouts: Vec<(QubitId, usize, bool)> = Vec::new();
+    let mut bouts: Vec<(QubitId, usize, bool, bool)> = Vec::new();
 
     for blk in 0..blocks {
         let hi = dialog_gcd_chunk_hi(blocks, blk, ext_n);
@@ -1775,8 +1803,55 @@ pub(crate) fn dialog_gcd_sub_ctrl_chunked_low_to_ext(
         } else {
             &[]
         };
+        if std::env::var("TRACE_APPLY_CHUNKS").is_ok() {
+            eprintln!(
+                "TRACE apply_sub block={blk} lo={lo} hi={hi} width={} boundary_live={} future_borrow={} active_before_ripple={}",
+                hi - lo,
+                bouts.len(),
+                future_boundary_carries.len(),
+                b.active_qubits
+            );
+        }
         b.set_phase("dialog_gcd_apply_chunk_sub_ripple");
-        if implicit_high_zero {
+        if implicit_high_zero
+            && (std::env::var("DIALOG_GCD_APPLY_FIRST_DIRTY_QOFFSET")
+                .ok()
+                .as_deref()
+                == Some("1")
+                || std::env::var("DIALOG_GCD_APPLY_ALL_DIRTY_QOFFSET")
+                    .ok()
+                    .as_deref()
+                    == Some("1"))
+            && (blk == 0
+                || std::env::var("DIALOG_GCD_APPLY_ALL_DIRTY_QOFFSET")
+                    .ok()
+                    .as_deref()
+                    == Some("1"))
+            && future_boundary_carries.len() >= 3
+            && source.len().saturating_sub(hi) >= acc_block.len().saturating_sub(2)
+        {
+            let clean2 = [future_boundary_carries[0], future_boundary_carries[1]];
+            let mut f_ext = f.clone();
+            f_ext.push(future_boundary_carries[2]);
+            if blk == 0 {
+                super::venting::isub_dirty_2clean_qoffset(
+                    b,
+                    &acc_block,
+                    &source[hi..],
+                    &clean2,
+                    &f_ext,
+                );
+            } else {
+                super::venting::isub_dirty_2clean_qoffset_borrow_q(
+                    b,
+                    &acc_block,
+                    &source[hi..],
+                    &clean2,
+                    &f_ext,
+                    borrow,
+                );
+            }
+        } else if implicit_high_zero {
             dialog_gcd_sub_fast_low_to_ext_with_borrowed_carries(
                 b,
                 &f,
@@ -1801,26 +1876,51 @@ pub(crate) fn dialog_gcd_sub_ctrl_chunked_low_to_ext(
         b.set_phase("dialog_gcd_apply_chunk_sub_clear");
         dialog_gcd_clear_controlled_slice_hmr(b, ctrl, source, lo, &f);
         b.free_vec(&f);
-        bouts.push((bout, hi, owned_bout));
+        if dialog_gcd_apply_eager_boundary_clear_enabled() {
+            if let Some((prev_bout, prev_p, prev_owned, prev_cleared)) = bouts.last_mut() {
+                if !*prev_cleared {
+                    b.set_phase("dialog_gcd_apply_chunk_sub_eager_boundary_clear");
+                    for i in 0..*prev_p {
+                        b.x(source[i]);
+                    }
+                    ccx_cmp_lt_into_fast(
+                        b,
+                        &source[..*prev_p],
+                        &acc_ext[..*prev_p],
+                        ctrl,
+                        *prev_bout,
+                    );
+                    for i in 0..*prev_p {
+                        b.x(source[i]);
+                    }
+                    *prev_cleared = true;
+                    if *prev_owned {
+                        b.free(*prev_bout);
+                    }
+                }
+            }
+        }
+        bouts.push((bout, hi, owned_bout, false));
         borrow = bout;
         lo = hi;
     }
 
     if dialog_gcd_apply_chunked_f_fuse_boundary_clears_enabled() {
-        if let Some(&(_, p, _)) = bouts.last() {
+        if let Some((_, p, _, _)) = bouts.iter().rev().find(|&&(_, _, _, cleared)| !cleared) {
             b.set_phase("dialog_gcd_apply_chunk_sub_boundary_clear");
-            for i in 0..p {
+            for i in 0..*p {
                 b.x(source[i]);
             }
             let targets = bouts
                 .iter()
-                .map(|&(bout, p, _)| (bout, p))
+                .filter(|&&(_, _, _, cleared)| !cleared)
+                .map(|&(bout, p, _, _)| (bout, p))
                 .collect::<Vec<_>>();
             if dialog_gcd_apply_boundary_conditional_replay_enabled() {
                 dialog_gcd_conditional_boundary_replay(
                     b,
-                    &source[..p],
-                    &acc_ext[..p],
+                    &source[..*p],
+                    &acc_ext[..*p],
                     ctrl,
                     c_in,
                     &targets,
@@ -1828,21 +1928,30 @@ pub(crate) fn dialog_gcd_sub_ctrl_chunked_low_to_ext(
             } else if let Some(split) = dialog_gcd_apply_boundary_split() {
                 ccx_cmp_lt_into_fast_prefix_targets_split(
                     b,
-                    &source[..p],
-                    &acc_ext[..p],
+                    &source[..*p],
+                    &acc_ext[..*p],
                     ctrl,
                     &targets,
-                    split.min(p.saturating_sub(1)),
+                    split.min((*p).saturating_sub(1)),
                 );
             } else {
-                ccx_cmp_lt_into_fast_prefix_targets(b, &source[..p], &acc_ext[..p], ctrl, &targets);
+                ccx_cmp_lt_into_fast_prefix_targets(
+                    b,
+                    &source[..*p],
+                    &acc_ext[..*p],
+                    ctrl,
+                    &targets,
+                );
             }
-            for i in 0..p {
+            for i in 0..*p {
                 b.x(source[i]);
             }
         }
     } else {
-        for &(bout, p, _) in bouts.iter().rev() {
+        for &(bout, p, _, cleared) in bouts.iter().rev() {
+            if cleared {
+                continue;
+            }
             b.set_phase("dialog_gcd_apply_chunk_sub_boundary_clear");
             for i in 0..p {
                 b.x(source[i]);
@@ -1853,8 +1962,8 @@ pub(crate) fn dialog_gcd_sub_ctrl_chunked_low_to_ext(
             }
         }
     }
-    for &(bout, _, owned_bout) in bouts.iter().rev() {
-        if owned_bout {
+    for &(bout, _, owned_bout, cleared) in bouts.iter().rev() {
+        if owned_bout && !cleared {
             b.free(bout);
         }
     }

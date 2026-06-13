@@ -259,10 +259,7 @@ fn emit_dialog_gcd_k5_clean_compressor_inverse(
 fn dialog_gcd_k5_head11_enabled() -> bool {
     dialog_gcd_k5_clean_block_enabled()
         && dialog_gcd_active_iterations() >= 5
-        && std::env::var("DIALOG_GCD_K5_HEAD11_CODEC")
-            .ok()
-            .as_deref()
-            == Some("1")
+        && dialog_gcd_k5_head11_codec_enabled()
 }
 
 fn emit_dialog_gcd_k5_head11_preconditioner(b: &mut B, data: &[QubitId; 13]) {

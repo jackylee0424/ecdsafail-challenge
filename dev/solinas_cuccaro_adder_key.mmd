@@ -1,0 +1,73 @@
+%% solinas_cuccaro_adder_key.mmd - route key for secp256k1 Solinas/Cuccaro rewrites.
+%% Every candidate adder rewrite should land on exactly one path through the
+%% six key fields before the route director assigns GPU budget.
+flowchart TD
+  Route[point_add route dump]
+  Key[SolinasCuccaroAdderKey]
+
+  Route -- emits --> Key
+
+  Key -- operation --> Op[operation]
+  Op -- add --> OpAdd[add]
+  Op -- sub --> OpSub[sub]
+  Op -- fold --> OpFold[fold]
+  Op -- double --> OpDouble[double]
+  Op -- halve --> OpHalve[halve]
+
+  Key -- constant_form --> Const[constant form]
+  Const -- sparse_c --> ConstSparse[sparse c = 2^32 + 977]
+  Const -- signed_sparse_c --> ConstSigned[signed sparse c]
+  Const -- generic --> ConstGeneric[generic constant]
+
+  Key -- control_model --> Ctrl[control model]
+  Ctrl -- materialized --> CtrlMat[materialized ctrl chooses c]
+  Ctrl -- direct_controlled --> CtrlDirect[direct controlled add]
+  Ctrl -- control_by_prep --> CtrlPrep[control by prep then unconditional ripple]
+
+  Key -- carry_model --> Carry[carry model]
+  Carry -- full --> CarryFull[full ripple carry]
+  Carry -- truncated_window --> CarryTrunc[truncated carry window]
+  Carry -- guarded_tail --> CarryGuard[guarded tail carry]
+
+  Key -- cleanup_model --> Clean[cleanup model]
+  Clean -- coherent --> CleanCoherent[coherent uncompute]
+  Clean -- measured_hmr --> CleanMeasured[measured HMR cleanup]
+  Clean -- phase_corrected --> CleanPhase[phase corrected cleanup]
+
+  Key -- host_model --> Host[host model]
+  Host -- fresh --> HostFresh[fresh scratch]
+  Host -- borrowed --> HostBorrowed[borrowed scratch]
+  Host -- streamed --> HostStreamed[streamed host]
+  Host -- derived_control_hosted --> HostDerived[derived control hosted]
+
+  Key -- mapped_by --> MDD[MDD axis and stale-evidence map]
+  Key -- lifecycle_checked_by --> TLA[TLA+ lifecycle and workflow gate]
+  Key -- bit_checked_by --> Z3[Z3 bit-vector obligations]
+  Key -- theorem_checked_by --> Lean[Lean4 modular and bound theorems]
+
+  MDD -- classifies --> AxisKind[resource_only seed_only provable_exact lossy_island]
+  TLA -- proves_or_blocks --> Lifecycle[host and cleanup lifecycle]
+  Z3 -- proves_or_counters --> BitExact[value carry guard phase side conditions]
+  Lean -- exports --> DeepFacts[secp256k1 identities and width/convergence facts]
+
+  Q1175[q1175 repaired clean overlay]
+  Q1175 -- delta --> Q1175Dirty[dirty qoffset apply add/sub]
+  Q1175 -- delta --> Q1175Boundary[borrow cleaned boundary replay]
+  Q1175 -- delta --> Q1175FoldHosts[streamed and hosted fold controls]
+  Q1175 -- delta --> Q1175Pins[route pins blocks25 cuts24 clean22 park17/15 seg144 nonce91794252]
+
+  Q1175Dirty -- requires --> Z3Q1175[Z3 q1175_dirty_qoffset_* gate skeleton]
+  Q1175Boundary -- requires --> TLAQ1175[TLA Q1175LifecycleSafe]
+  Q1175FoldHosts -- requires --> LeanQ1175[Lean q1175_streamed_fold_host_lifecycle]
+  Q1175Pins -- classified_as --> SeedOnly[seed_only nonce pin]
+  Q1175Pins -- classified_as --> LossyQ1175[lossy_island structural pins]
+
+  Z3Q1175 -- does_not_prove --> Nonce91794252[DIALOG_TAIL_NONCE 91794252]
+  TLAQ1175 -- does_not_prove --> Nonce91794252
+  LeanQ1175 -- does_not_prove --> Nonce91794252
+
+  Lifecycle -- feeds --> NonceKey[nonce_quality_key]
+  BitExact -- feeds --> NonceKey
+  DeepFacts -- feeds --> NonceKey
+  AxisKind -- budgets --> SearchBudget[GPU search budget]
+  NonceKey -- dedupes --> SearchBudget

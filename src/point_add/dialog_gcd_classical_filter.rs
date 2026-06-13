@@ -13,8 +13,9 @@
 //! This is analysis-only tooling; it does not change the quantum circuit.
 
 use crate::point_add::{
+    dialog_gcd_k5_head11_codec_enabled,
     dialog_gcd_k5_head11_supports, dialog_gcd_k5_tail6_graph9_supports,
-    DIALOG_GCD_K5_TAIL6_GRAPH_SUPPORT, DIALOG_GCD_K5_TAIL7_SUPPORT,
+    route_config, DIALOG_GCD_K5_TAIL6_GRAPH_SUPPORT, DIALOG_GCD_K5_TAIL7_SUPPORT,
     DIALOG_GCD_PA9024_COMPARE_SCHEDULE, N, SECP256K1_P,
 };
 use alloy_primitives::U256;
@@ -353,53 +354,24 @@ pub struct DialogApplyFilterConfig {
 
 impl DialogApplyFilterConfig {
     pub fn from_env() -> Self {
-        let fused_fold_window = std::env::var("DIALOG_GCD_FOLD_CARRY_TRUNC_W")
-            .ok()
-            .and_then(|s| s.parse::<usize>().ok())
-            .filter(|&w| w > 0)
-            .or_else(|| {
-                std::env::var("KAL_DOUBLE_CARRY_TRUNC_W")
-                    .ok()
-                    .and_then(|s| s.parse::<usize>().ok())
-                    .filter(|&w| w > 0)
-            });
-        let special_fold_window = std::env::var("KAL_FOLD_CARRY_TRUNC_W")
-            .ok()
-            .and_then(|s| s.parse::<usize>().ok())
-            .filter(|&w| w > 0);
+        let fused_fold_window = route_config::env_nonzero_usize("DIALOG_GCD_FOLD_CARRY_TRUNC_W")
+            .or_else(|| route_config::env_nonzero_usize("KAL_DOUBLE_CARRY_TRUNC_W"));
+        let special_fold_window = route_config::env_nonzero_usize("KAL_FOLD_CARRY_TRUNC_W");
         let fused_fold_step_windows =
-            std::env::var("DIALOG_GCD_FOLD_CARRY_TRUNC_STEP_WINDOWS")
-                .ok()
-                .map(|s| parse_step_map(&s))
-                .unwrap_or_default();
+            route_config::env_step_map("DIALOG_GCD_FOLD_CARRY_TRUNC_STEP_WINDOWS");
         let special_fold_step_windows =
-            std::env::var("DIALOG_GCD_SPECIAL_FOLD_CARRY_TRUNC_STEP_WINDOWS")
-                .ok()
-                .map(|s| parse_step_map(&s))
-                .unwrap_or_default();
-        let clean_compare_bits = std::env::var("DIALOG_GCD_APPLY_CLEAN_COMPARE_BITS")
-            .ok()
-            .and_then(|s| s.parse::<usize>().ok())
-            .filter(|&bits| (1..=N).contains(&bits))
-            .unwrap_or_else(|| {
-                std::env::var("DIALOG_GCD_COMPARE_BITS")
-                    .ok()
-                    .and_then(|s| s.parse::<usize>().ok())
-                    .filter(|&bits| (1..=N).contains(&bits))
-                    .unwrap_or(N)
-            });
-        let overflow_step_bits = std::env::var("DIALOG_GCD_SPECIAL_OVERFLOW_CLEAN_STEP_BITS")
-            .ok()
-            .map(|s| parse_step_map(&s))
-            .unwrap_or_default();
-        let underflow_step_bits = std::env::var("DIALOG_GCD_SPECIAL_UNDERFLOW_CLEAN_STEP_BITS")
-            .ok()
-            .map(|s| parse_step_map(&s))
-            .unwrap_or_default();
-        let clear_product_residual = std::env::var("DIALOG_GCD_RAW_IPMUL_CLEAR_P_RESIDUAL")
-            .ok()
-            .as_deref()
-            == Some("1");
+            route_config::env_step_map("DIALOG_GCD_SPECIAL_FOLD_CARRY_TRUNC_STEP_WINDOWS");
+        let clean_compare_bits =
+            route_config::env_usize_in("DIALOG_GCD_APPLY_CLEAN_COMPARE_BITS", 1..=N)
+                .unwrap_or_else(|| {
+                    route_config::env_usize_in("DIALOG_GCD_COMPARE_BITS", 1..=N).unwrap_or(N)
+                });
+        let overflow_step_bits =
+            route_config::env_step_map("DIALOG_GCD_SPECIAL_OVERFLOW_CLEAN_STEP_BITS");
+        let underflow_step_bits =
+            route_config::env_step_map("DIALOG_GCD_SPECIAL_UNDERFLOW_CLEAN_STEP_BITS");
+        let clear_product_residual =
+            route_config::env_flag("DIALOG_GCD_RAW_IPMUL_CLEAR_P_RESIDUAL");
 
         Self {
             fused_fold_window,
@@ -468,120 +440,39 @@ impl Default for DialogGcdFilterConfig {
 
 impl DialogGcdFilterConfig {
     pub fn from_env() -> Self {
-        let active_iterations = std::env::var("DIALOG_GCD_ACTIVE_ITERATIONS")
-            .ok()
-            .and_then(|s| s.parse().ok())
-            .filter(|&iters| (1..=MAX_GCD_ITERS).contains(&iters))
-            .unwrap_or(MAX_GCD_ITERS);
-        let compare_bits = std::env::var("DIALOG_GCD_COMPARE_BITS")
-            .ok()
-            .and_then(|s| s.parse().ok())
-            .filter(|&bits| (1..=N).contains(&bits))
-            .unwrap_or(57);
-        let width_margin = std::env::var("DIALOG_GCD_WIDTH_MARGIN")
-            .ok()
-            .and_then(|s| s.parse::<f64>().ok())
-            .filter(|m| m.is_finite() && *m >= 0.0 && *m <= N as f64)
-            .unwrap_or(37.0);
-        let width_slope = std::env::var("DIALOG_GCD_WIDTH_SLOPE_X1000")
-            .ok()
-            .and_then(|s| s.parse::<f64>().ok())
-            .filter(|s| s.is_finite() && *s > 0.0 && *s <= 4000.0)
-            .map(|s| s / 1000.0)
-            .unwrap_or(0.5 * 1.415);
-        let body_carry_trims = std::env::var("DIALOG_GCD_BODY_CARRY_BAND_TRIMS")
-            .ok()
-            .and_then(|s| parse_trim_list(&s));
-        let pa9024_compare_schedule =
-            std::env::var("DIALOG_GCD_PA9024_COMPARE_SCHEDULE").ok().as_deref() == Some("1");
-        let pa9024_compare_margin = std::env::var("DIALOG_GCD_PA9024_COMPARE_SCHEDULE_MARGIN")
-            .ok()
-            .and_then(|s| s.parse().ok())
-            .unwrap_or(0);
-        let pa9024_compare_floor = std::env::var("DIALOG_GCD_PA9024_COMPARE_SCHEDULE_FLOOR")
-            .ok()
-            .and_then(|s| s.parse().ok())
-            .filter(|&bits| bits <= N)
-            .unwrap_or(1)
-            .max(1);
-        let compare_step_bits = std::env::var("DIALOG_GCD_COMPARE_STEP_BITS")
-            .ok()
-            .map(|s| parse_step_map(&s))
-            .unwrap_or_default();
-        let odd_u_lowbit_fastpath =
-            std::env::var("DIALOG_GCD_ODD_U_LOWBIT_FASTPATH").ok().as_deref() == Some("1");
-        let k2 = std::env::var("DIALOG_GCD_K2").ok().as_deref() == Some("1");
-        let variable_width =
-            std::env::var("DIALOG_GCD_RAW_TOBITVECTOR_VARIABLE_WIDTH").ok().as_deref() != Some("0");
-        let raw_tobitvector_materialized_sub =
-            std::env::var("DIALOG_GCD_RAW_TOBITVECTOR_MATERIALIZED_SUB")
-                .ok()
-                .as_deref()
-                != Some("0");
-        let tobitvector_cswap_body_trim =
-            std::env::var("DIALOG_GCD_TOBITVECTOR_CSWAP_BODY_TRIM")
-                .ok()
-                .as_deref()
-                == Some("1");
-        let tobitvector_shift_body_trim =
-            std::env::var("DIALOG_GCD_TOBITVECTOR_SHIFT_BODY_TRIM")
-                .ok()
-                .as_deref()
-                == Some("1");
-        let skip_zero_edge_tobit_fwd_cshift =
-            std::env::var("DIALOG_GCD_SKIP_ZERO_EDGE_CSHIFT")
-                .ok()
-                .as_deref()
-                == Some("1")
-                || std::env::var("DIALOG_GCD_SKIP_ZERO_EDGE_TOBIT_CSHIFT")
-                    .ok()
-                    .as_deref()
-                    == Some("1")
-                || std::env::var("DIALOG_GCD_SKIP_ZERO_EDGE_TOBIT_FWD_CSHIFT")
-                    .ok()
-                    .as_deref()
-                    == Some("1");
-        let width_step_bumps = std::env::var("DIALOG_GCD_WIDTH_STEP_BUMPS")
-            .ok()
-            .map(|s| parse_step_map(&s))
-            .unwrap_or_default();
-        let body_step_givebacks = std::env::var("DIALOG_GCD_BODY_STEP_GIVEBACKS")
-            .ok()
-            .map(|s| parse_step_map(&s))
-            .unwrap_or_default();
-        let k2_force0 = std::env::var("DIALOG_GCD_K2_FORCE0").ok().as_deref() == Some("1");
-        let strict_compare =
-            std::env::var("DIALOG_GCD_FILTER_STRICT_COMPARE").ok().as_deref() == Some("1");
-        let body_carry_trunc_w = std::env::var("DIALOG_GCD_BODY_CARRY_TRUNC_W")
-            .ok()
-            .and_then(|s| s.parse().ok())
-            .unwrap_or(0);
+        let core = route_config::DialogGcdCoreRouteEnv::from_env(
+            MAX_GCD_ITERS,
+            N,
+            57,
+            37.0,
+            0.5 * 1.415,
+        );
 
         Self {
-            active_iterations,
-            compare_bits,
-            width_margin,
-            width_slope,
+            active_iterations: core.active_iterations,
+            compare_bits: core.compare_bits,
+            width_margin: core.width_margin,
+            width_slope: core.width_slope,
             active_width_overrides: Vec::new(),
             compare_width_overrides: Vec::new(),
             body_width_overrides: Vec::new(),
-            body_carry_trims,
-            pa9024_compare_schedule,
-            pa9024_compare_margin,
-            pa9024_compare_floor,
-            compare_step_bits,
-            odd_u_lowbit_fastpath,
-            k2,
-            variable_width,
-            raw_tobitvector_materialized_sub,
-            tobitvector_cswap_body_trim,
-            tobitvector_shift_body_trim,
-            skip_zero_edge_tobit_fwd_cshift,
-            width_step_bumps,
-            body_step_givebacks,
-            k2_force0,
-            strict_compare,
-            body_carry_trunc_w,
+            body_carry_trims: core.body_carry_trims,
+            pa9024_compare_schedule: core.pa9024_compare_schedule,
+            pa9024_compare_margin: core.pa9024_compare_margin,
+            pa9024_compare_floor: core.pa9024_compare_floor,
+            compare_step_bits: core.compare_step_bits,
+            odd_u_lowbit_fastpath: core.odd_u_lowbit_fastpath,
+            k2: core.k2,
+            variable_width: core.variable_width,
+            raw_tobitvector_materialized_sub: core.raw_tobitvector_materialized_sub,
+            tobitvector_cswap_body_trim: core.tobitvector_cswap_body_trim,
+            tobitvector_shift_body_trim: core.tobitvector_shift_body_trim,
+            skip_zero_edge_tobit_fwd_cshift: core.skip_zero_edge_tobit_fwd_cshift,
+            width_step_bumps: core.width_step_bumps,
+            body_step_givebacks: core.body_step_givebacks,
+            k2_force0: core.k2_force0,
+            strict_compare: core.strict_compare,
+            body_carry_trunc_w: core.body_carry_trunc_w,
         }
     }
 
@@ -626,11 +517,7 @@ impl DialogGcdFilterConfig {
         }
         let mut w = self
             .body_carry_band_trim(step)
-            .or_else(|| {
-                std::env::var("DIALOG_GCD_BODY_CARRY_TRUNC_W")
-                    .ok()
-                    .and_then(|s| s.parse().ok())
-            })
+            .or_else(|| route_config::env_usize("DIALOG_GCD_BODY_CARRY_TRUNC_W"))
             .unwrap_or(0);
         w = w.saturating_add(body_carry_extra_notch(step));
         w = w.saturating_sub(step_map_value(&self.body_step_givebacks, step));
@@ -685,95 +572,32 @@ impl DialogGcdFilterConfig {
 fn body_carry_extra_notch(step: usize) -> usize {
     let mut extra = 0usize;
 
-    let trio_enabled = std::env::var("DIALOG_GCD_TRIO_WIDTH_NOTCH")
-        .ok()
-        .as_deref()
-        != Some("0");
-    if trio_enabled {
-        let trio_step = std::env::var("DIALOG_GCD_TRIO_WIDTH_NOTCH_STEP")
-            .ok()
-            .and_then(|s| s.parse::<usize>().ok())
-            .unwrap_or(11);
-        if step == trio_step {
-            extra = extra.saturating_add(
-                std::env::var("DIALOG_GCD_TRIO_WIDTH_NOTCH_EXTRA")
-                    .ok()
-                    .and_then(|s| s.parse::<usize>().ok())
-                    .unwrap_or(2),
-            );
-        }
+    if route_config::env_flag_default_on("DIALOG_GCD_TRIO_WIDTH_NOTCH")
+        && step == route_config::env_usize_or("DIALOG_GCD_TRIO_WIDTH_NOTCH_STEP", 11)
+    {
+        extra = extra
+            .saturating_add(route_config::env_usize_or("DIALOG_GCD_TRIO_WIDTH_NOTCH_EXTRA", 2));
     }
 
-    if let Ok(steps) = std::env::var("DIALOG_GCD_BINDER_NOTCH_STEPS") {
-        let hits = steps
-            .split(',')
-            .filter_map(|s| s.trim().parse::<usize>().ok())
-            .any(|s| s == step);
-        if hits {
-            extra = extra.saturating_add(
-                std::env::var("DIALOG_GCD_BINDER_NOTCH_EXTRA")
-                    .ok()
-                    .and_then(|s| s.parse::<usize>().ok())
-                    .unwrap_or(2),
-            );
-        }
+    if route_config::env_usize_csv("DIALOG_GCD_BINDER_NOTCH_STEPS").contains(&step) {
+        extra =
+            extra.saturating_add(route_config::env_usize_or("DIALOG_GCD_BINDER_NOTCH_EXTRA", 2));
     }
 
-    if let Ok(map) = std::env::var("DIALOG_GCD_BINDER_NOTCH_MAP") {
-        extra = extra.saturating_add(
-            map.split(',')
-                .filter_map(|entry| {
-                    let (s, e) = entry.trim().split_once(':')?;
-                    Some((
-                        s.trim().parse::<usize>().ok()?,
-                        e.trim().parse::<usize>().ok()?,
-                    ))
-                })
-                .filter_map(|(s, e)| (s == step).then_some(e))
-                .sum(),
-        );
-    }
+    extra = extra.saturating_add(route_config::env_step_map_value(
+        "DIALOG_GCD_BINDER_NOTCH_MAP",
+        step,
+    ));
 
     extra
 }
 
-fn parse_trim_list(s: &str) -> Option<Vec<usize>> {
-    if s.trim().is_empty() {
-        return None;
-    }
-    let trims: Vec<usize> = s
-        .split(',')
-        .filter_map(|t| t.trim().parse().ok())
-        .collect();
-    if trims.is_empty() {
-        None
-    } else {
-        Some(trims)
-    }
-}
-
-fn parse_step_map(s: &str) -> Vec<(usize, usize)> {
-    s.split(',')
-        .filter_map(|entry| {
-            let (step, value) = entry.trim().split_once(':')?;
-            Some((
-                step.trim().parse::<usize>().ok()?,
-                value.trim().parse::<usize>().ok()?,
-            ))
-        })
-        .collect()
-}
-
 fn step_map_value(map: &[(usize, usize)], step: usize) -> usize {
-    map.iter()
-        .filter_map(|&(s, value)| (s == step).then_some(value))
-        .sum()
+    route_config::step_map_value(map, step)
 }
 
 fn step_map_override(map: &[(usize, usize)], step: usize) -> Option<usize> {
-    map.iter()
-        .rev()
-        .find_map(|&(s, value)| (s == step).then_some(value))
+    route_config::step_map_override(map, step)
 }
 
 #[inline]
@@ -1239,11 +1063,7 @@ fn tail6_pattern(log: &[DialogGcdStepLog]) -> u32 {
 }
 
 fn check_tail_pair_codec(log: &[DialogGcdStepLog]) -> Result<(), HardReason> {
-    if std::env::var("DIALOG_GCD_K5_HEAD11_CODEC")
-        .ok()
-        .as_deref()
-        == Some("1")
-    {
+    if dialog_gcd_k5_head11_codec_enabled() {
         if log.len() < 5 {
             return Err(HardReason::HeadK5Mismatch { pattern: 0 });
         }

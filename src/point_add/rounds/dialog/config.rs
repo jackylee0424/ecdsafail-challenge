@@ -4,6 +4,7 @@
 //! (`*_enabled()` / `*_bits()` / `*_blocks()` / width + schedule helpers) that
 //! the raw and compressed emitters consult. Env-var STRINGS are frozen.
 use super::*;
+use crate::point_add::route_config::{DialogGcdCoreRouteEnv, DialogGcdCoreRouteEnvNames};
 
 pub const DIALOG_GCD_ACTIVE_ITERATIONS_ENV: &str = "DIALOG_GCD_ACTIVE_ITERATIONS";
 pub const DIALOG_GCD_COMPARE_BITS_ENV: &str = "DIALOG_GCD_COMPARE_BITS";
@@ -145,6 +146,13 @@ pub(crate) fn dialog_gcd_apply_chunked_f_fuse_boundary_clears_enabled() -> bool 
         .ok()
         .as_deref()
         != Some("0")
+}
+
+pub(crate) fn dialog_gcd_apply_eager_boundary_clear_enabled() -> bool {
+    std::env::var("DIALOG_GCD_APPLY_EAGER_BOUNDARY_CLEAR")
+        .ok()
+        .as_deref()
+        == Some("1")
 }
 
 pub(crate) fn dialog_gcd_apply_borrow_future_boundary_carries_enabled() -> bool {
@@ -411,6 +419,10 @@ pub(crate) fn dialog_gcd_k5_clean_block_enabled() -> bool {
             == Some("1")
 }
 
+pub(crate) fn dialog_gcd_k5_head11_codec_enabled() -> bool {
+    crate::point_add::route_config::env_flag("DIALOG_GCD_K5_HEAD11_CODEC")
+}
+
 /// Compressed bits per transcript block. K=2 packs an extra `shift2` bit per step
 /// (GROUP_SIZE=3 steps) on top of the round763 6->5 base packing: 5 + 3 = 8.
 /// NOTE: the compile-time `DIALOG_GCD_HIGH_TAIL_ALIAS_BLOCK_BITS` const stays 5
@@ -467,51 +479,45 @@ pub const DIALOG_GCD_PA9024_COMPARE_SCHEDULE: [usize; 258] = [
     23, 21, 21, 19, 19, 17, 17, 15, 15, 13, 13, 11, 11, 9, 9, 7, 7, 5,
 ];
 
+pub(crate) fn dialog_gcd_core_route_env() -> DialogGcdCoreRouteEnv {
+    DialogGcdCoreRouteEnv::from_env_names(
+        DialogGcdCoreRouteEnvNames {
+            active_iterations: DIALOG_GCD_ACTIVE_ITERATIONS_ENV,
+            compare_bits: DIALOG_GCD_COMPARE_BITS_ENV,
+            apply_clean_compare_bits: DIALOG_GCD_APPLY_CLEAN_COMPARE_BITS_ENV,
+            pa9024_compare_schedule: DIALOG_GCD_PA9024_COMPARE_SCHEDULE_ENV,
+            pa9024_compare_schedule_floor: DIALOG_GCD_PA9024_COMPARE_SCHEDULE_FLOOR_ENV,
+        },
+        DIALOG_GCD_MAX_ITERATIONS,
+        N,
+        DIALOG_GCD_DEFAULT_COMPARE_BITS,
+        37.0,
+        0.5 * 1.415,
+    )
+}
+
 pub(crate) fn dialog_gcd_active_iterations() -> usize {
-    std::env::var(DIALOG_GCD_ACTIVE_ITERATIONS_ENV)
-        .ok()
-        .and_then(|s| s.parse::<usize>().ok())
-        .filter(|&iters| (1..=DIALOG_GCD_MAX_ITERATIONS).contains(&iters))
-        .unwrap_or(DIALOG_GCD_MAX_ITERATIONS)
+    dialog_gcd_core_route_env().active_iterations
 }
 
 pub(crate) fn dialog_gcd_compare_bits() -> usize {
-    std::env::var(DIALOG_GCD_COMPARE_BITS_ENV)
-        .ok()
-        .and_then(|s| s.parse::<usize>().ok())
-        .filter(|&bits| (1..=N).contains(&bits))
-        .unwrap_or(DIALOG_GCD_DEFAULT_COMPARE_BITS)
+    dialog_gcd_core_route_env().compare_bits
 }
 
 pub(crate) fn dialog_gcd_apply_clean_compare_bits() -> usize {
-    std::env::var(DIALOG_GCD_APPLY_CLEAN_COMPARE_BITS_ENV)
-        .ok()
-        .and_then(|s| s.parse::<usize>().ok())
-        .filter(|&bits| (1..=N).contains(&bits))
-        .unwrap_or_else(dialog_gcd_compare_bits)
+    dialog_gcd_core_route_env().apply_clean_compare_bits
 }
 
 pub(crate) fn dialog_gcd_pa9024_compare_schedule_enabled() -> bool {
-    std::env::var(DIALOG_GCD_PA9024_COMPARE_SCHEDULE_ENV)
-        .ok()
-        .as_deref()
-        == Some("1")
+    dialog_gcd_core_route_env().pa9024_compare_schedule
 }
 
 pub(crate) fn dialog_gcd_pa9024_compare_schedule_floor() -> usize {
-    std::env::var(DIALOG_GCD_PA9024_COMPARE_SCHEDULE_FLOOR_ENV)
-        .ok()
-        .and_then(|s| s.parse::<usize>().ok())
-        .filter(|&bits| bits <= N)
-        .unwrap_or(1)
-        .max(1)
+    dialog_gcd_core_route_env().pa9024_compare_floor
 }
 
 pub(crate) fn dialog_gcd_pa9024_compare_schedule_margin() -> usize {
-    std::env::var("DIALOG_GCD_PA9024_COMPARE_SCHEDULE_MARGIN")
-        .ok()
-        .and_then(|s| s.parse::<usize>().ok())
-        .unwrap_or(0)
+    dialog_gcd_core_route_env().pa9024_compare_margin
 }
 
 pub(crate) fn dialog_gcd_compare_bits_for_step(step: usize, active_width: usize) -> usize {
